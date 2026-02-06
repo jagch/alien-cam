@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 )
@@ -40,9 +39,12 @@ func main() {
 	ip := getLocalIP()
 
 	fmt.Printf("🎥 Alien Cam Server iniciado\n")
-	fmt.Printf("📱 Acceso local: http://%s:%s\n", ip, server.port)
+	fmt.Printf("📱 Acceso local: http://localhost:%s\n", server.port)
 	fmt.Printf("💻 Acceso desde otros dispositivos: http://%s:%s\n", ip, server.port)
 	fmt.Printf("🌐 Presiona Ctrl+C para detener\n\n")
+	fmt.Printf("📋 Si la IP %s no funciona, intenta:\n", ip)
+	fmt.Printf("   - Abrir Termux y ejecutar: ip route get 8.8.8.8\n")
+	fmt.Printf("   - O revisar la configuración WiFi de tu celular\n\n")
 
 	log.Fatal(http.ListenAndServe(":"+server.port, nil))
 }
@@ -323,32 +325,45 @@ func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
             startBtn.disabled = true;
             
             try {
-                const response = await fetch('/api/start-camera', {
-                    method: 'POST'
-                });
+                // Primero verificar si el endpoint de streaming está disponible
+                const testStream = await fetch('/stream?' + new Date().getTime());
                 
-                if (response.ok) {
-                    isStreaming = true;
-                    updateStatus(true, 'Cámara activa y transmitiendo');
+                if (testStream.ok) {
+                    const response = await fetch('/api/start-camera', {
+                        method: 'POST'
+                    });
                     
-                    // Actualizar imagen cada segundo
-                    setTimeout(() => {
-                        if (isStreaming) {
-                            const videoStream = document.getElementById('videoStream');
-                            videoStream.src = '/stream?' + new Date().getTime();
-                        }
-                    }, 1000);
+                    if (response.ok) {
+                        isStreaming = true;
+                        updateStatus(true, 'Cámara activa y transmitiendo');
+                        
+                        // Cargar la primera imagen inmediatamente
+                        const videoStream = document.getElementById('videoStream');
+                        videoStream.src = '/stream?' + new Date().getTime();
+                    } else {
+                        throw new Error('Error al iniciar la cámara');
+                    }
                 } else {
-                    throw new Error('Error al iniciar la cámara');
+                    // El streaming funciona pero con imagen de demostración
+                    const response = await fetch('/api/start-camera', {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        isStreaming = true;
+                        updateStatus(true, 'Cámara demostración activa (instala Termux:API para acceso real)');
+                        
+                        const videoStream = document.getElementById('videoStream');
+                        videoStream.src = '/stream?' + new Date().getTime();
+                    } else {
+                        throw new Error('Error al iniciar la cámara');
+                    }
                 }
             } catch (error) {
                 console.error('Error:', error);
-                updateStatus(false, 'Error al iniciar la cámara');
-                startBtn.disabled = false;
-            }
-            
-            if (!isStreaming) {
+                updateStatus(false, 'Error al iniciar la cámara: ' + error.message);
                 startBtn.innerHTML = originalText;
+                startBtn.disabled = false;
             }
         }
         
@@ -377,11 +392,24 @@ func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
             stopBtn.innerHTML = originalText;
         }
         
-        // Actualizar stream periódicamente
+        // Actualizar stream periódicamente con manejo de errores
         setInterval(() => {
             if (isStreaming) {
                 const videoStream = document.getElementById('videoStream');
-                videoStream.src = '/stream?' + new Date().getTime();
+                const newSrc = '/stream?' + new Date().getTime();
+                
+                // Verificar si la imagen anterior cargó correctamente
+                videoStream.onerror = function() {
+                    console.error('Error al cargar imagen del stream');
+                    // Intentar recargar después de un pequeño delay
+                    setTimeout(() => {
+                        if (isStreaming) {
+                            videoStream.src = '/stream?' + new Date().getTime();
+                        }
+                    }, 2000);
+                };
+                
+                videoStream.src = newSrc;
             }
         }, 1000);
     </script>
@@ -459,52 +487,76 @@ func (cs *CameraServer) handleStopCamera(w http.ResponseWriter, r *http.Request)
 }
 
 func (cs *CameraServer) captureImage() ([]byte, error) {
-	// Intentar usar Termux API para capturar imagen
-	if runtime.GOOS == "android" || os.Getenv("TERMUX") != "" {
+	// Siempre intentar con Termux API primero si estamos en Android
+	if os.Getenv("TERMUX") != "" {
+		// Crear directorio temporal si no existe
+		tmpDir := "/data/data/com.termux/files/home"
+		tmpFile := tmpDir + "/tmp_cam.jpg"
+
 		// Verificar si Termux:API está disponible
-		cmd := exec.Command("termux-camera-info")
+		cmd := exec.Command("sh", "-c", "command -v termux-camera-info")
 		if err := cmd.Run(); err == nil {
-			// Capturar imagen
-			cmd = exec.Command("termux-camera-photo", "-o", "/data/data/com.termux/files/home/tmp_cam.jpg")
+			// Capturar imagen con Termux:API
+			cmd = exec.Command("termux-camera-photo", "-o", tmpFile)
 			if err := cmd.Run(); err == nil {
 				// Leer la imagen capturada
-				imgData, err := os.ReadFile("/data/data/com.termux/files/home/tmp_cam.jpg")
+				imgData, err := os.ReadFile(tmpFile)
 				if err == nil {
 					return imgData, nil
 				}
 			}
 		}
 	}
+
+	// Si no hay Termux o falla, retornar error para mostrar imagen demostración
 	return nil, fmt.Errorf("camera not available")
 }
 
 func getLocalIP() string {
-	// Intentar obtener IP local - simplificado para Termux
+	// Método mejorado para obtener IP local en Termux
 	if os.Getenv("TERMUX") != "" {
-		// En Termux, podemos usar un método simple
-		cmd := exec.Command("ip", "route", "get", "1.1.1.1")
+		// Método 1: ip route get
+		cmd := exec.Command("sh", "-c", "ip route get 8.8.8.8 | awk '{print $7}' | head -1")
 		if output, err := cmd.Output(); err == nil {
-			lines := strings.Split(string(output), "\n")
-			for _, line := range lines {
-				if strings.Contains(line, "src") {
-					parts := strings.Fields(line)
-					for i, part := range parts {
-						if part == "src" && i+1 < len(parts) {
-							return parts[i+1]
-						}
+			ip := strings.TrimSpace(string(output))
+			if ip != "" && ip != "0.0.0.0" {
+				return ip
+			}
+		}
+
+		// Método 2: hostname -I
+		cmd = exec.Command("hostname", "-I")
+		if output, err := cmd.Output(); err == nil {
+			ips := strings.Fields(string(output))
+			for _, ip := range ips {
+				if strings.HasPrefix(ip, "192.168.") || strings.HasPrefix(ip, "10.") ||
+					strings.HasPrefix(ip, "172.") || ip == "localhost" {
+					if ip != "localhost" {
+						return ip
 					}
 				}
 			}
 		}
-		// Fallback: intentar con hostname -I
-		cmd = exec.Command("hostname", "-I")
+
+		// Método 3: ifconfig
+		cmd = exec.Command("sh", "-c", "ifconfig wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}'")
 		if output, err := cmd.Output(); err == nil {
-			ips := strings.Fields(string(output))
-			if len(ips) > 0 {
-				return ips[0]
+			ip := strings.TrimSpace(string(output))
+			if ip != "" && ip != "0.0.0.0" {
+				return ip
+			}
+		}
+
+		// Método 4: ip addr
+		cmd = exec.Command("sh", "-c", "ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1")
+		if output, err := cmd.Output(); err == nil {
+			ip := strings.TrimSpace(string(output))
+			if ip != "" && ip != "0.0.0.0" {
+				return ip
 			}
 		}
 	}
-	// Último fallback
+
+	// Fallback genérico
 	return "localhost"
 }
