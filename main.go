@@ -13,11 +13,14 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 type CameraServer struct {
 	port    string
 	running bool
+	webrtc  *WebRTCManager
 }
 
 type StreamInfo struct {
@@ -29,27 +32,40 @@ type StreamInfo struct {
 
 func main() {
 	server := &CameraServer{
-		port: "8080",
+		port:   "8080",
+		webrtc: NewWebRTCManager(),
 	}
 
-	http.HandleFunc("/", server.handleHome)
-	http.HandleFunc("/stream", server.handleStream)
-	http.HandleFunc("/api/status", server.handleStatus)
-	http.HandleFunc("/api/start-camera", server.handleStartCamera)
-	http.HandleFunc("/api/stop-camera", server.handleStopCamera)
+	// Crear router Gin para WebRTC
+	router := gin.Default()
+
+	// Servir archivos estáticos
+	router.Static("/static", "./static")
+
+	// Endpoints originales
+	router.GET("/", server.handleHomeGin)
+	router.GET("/stream", server.handleStreamGin)
+	router.GET("/api/status", server.handleStatusGin)
+	router.POST("/api/start-camera", server.handleStartCameraGin)
+	router.POST("/api/stop-camera", server.handleStopCameraGin)
+
+	// Endpoints WebRTC
+	router.GET("/webrtc", server.handleWebRTC)
+	router.GET("/ws", server.handleWebSocket)
 
 	// Obtener IP local
 	ip := getLocalIP()
 
-	fmt.Printf("🎥 Alien Cam Server iniciado\n")
-	fmt.Printf("📱 Acceso local: http://localhost:%s\n", server.port)
-	fmt.Printf("💻 Acceso desde otros dispositivos: http://%s:%s\n", ip, server.port)
+	fmt.Printf("🎥 Alien Cam Server con WebRTC iniciado\n")
+	fmt.Printf("📱 Streaming tradicional: http://localhost:%s\n", server.port)
+	fmt.Printf("🚀 WebRTC streaming: http://localhost:%s/webrtc\n", server.port)
+	fmt.Printf("💻 Acceso remoto: http://%s:%s\n", ip, server.port)
 	fmt.Printf("🌐 Presiona Ctrl+C para detener\n\n")
 	fmt.Printf("📋 Si la IP %s no funciona, intenta:\n", ip)
 	fmt.Printf("   - Abrir Termux y ejecutar: ip route get 8.8.8.8\n")
 	fmt.Printf("   - O revisar la configuración WiFi de tu celular\n\n")
 
-	log.Fatal(http.ListenAndServe(":"+server.port, nil))
+	log.Fatal(router.Run(":" + server.port))
 }
 
 func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +137,7 @@ func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
             height: 100%;
             object-fit: cover;
             display: none;
+            transition: opacity 0.05s ease-in-out;
         }
         
         .controls {
@@ -395,26 +412,36 @@ func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
             stopBtn.innerHTML = originalText;
         }
         
-        // Actualizar stream periódicamente con manejo de errores
+        // Actualizar stream periódicamente con manejo de errores - más rápido para video fluido
         setInterval(() => {
             if (isStreaming) {
                 const videoStream = document.getElementById('videoStream');
                 const newSrc = '/stream?' + new Date().getTime();
                 
-                // Verificar si la imagen anterior cargó correctamente
-                videoStream.onerror = function() {
+                // Precargar siguiente imagen para transición suave
+                const nextImg = new Image();
+                nextImg.onload = function() {
+                    videoStream.src = newSrc;
+                };
+                nextImg.onerror = function() {
                     console.error('Error al cargar imagen del stream');
                     // Intentar recargar después de un pequeño delay
                     setTimeout(() => {
                         if (isStreaming) {
                             videoStream.src = '/stream?' + new Date().getTime();
                         }
-                    }, 2000);
+                    }, 500);
                 };
+                nextImg.src = newSrc;
                 
-                videoStream.src = newSrc;
+                // Fallback directo si la precarga falla
+                setTimeout(() => {
+                    if (videoStream.src !== newSrc && isStreaming) {
+                        videoStream.src = newSrc;
+                    }
+                }, 100);
             }
-        }, 1000);
+        }, 100); // Más frecuente para mejor fluidez
     </script>
 </body>
 </html>`
@@ -524,6 +551,36 @@ func (cs *CameraServer) handleStopCamera(w http.ResponseWriter, r *http.Request)
 		"status":  "stopped",
 		"message": "Cámara detendida correctamente",
 	})
+}
+
+func (cs *CameraServer) handleWebRTC(c *gin.Context) {
+	// Servir la página WebRTC
+	c.File("webrtc.html")
+}
+
+func (cs *CameraServer) handleWebSocket(c *gin.Context) {
+	cs.webrtc.handleWebSocket(c)
+}
+
+// Wrappers para Gin
+func (cs *CameraServer) handleHomeGin(c *gin.Context) {
+	cs.handleHome(c.Writer, c.Request)
+}
+
+func (cs *CameraServer) handleStreamGin(c *gin.Context) {
+	cs.handleStream(c.Writer, c.Request)
+}
+
+func (cs *CameraServer) handleStatusGin(c *gin.Context) {
+	cs.handleStatus(c.Writer, c.Request)
+}
+
+func (cs *CameraServer) handleStartCameraGin(c *gin.Context) {
+	cs.handleStartCamera(c.Writer, c.Request)
+}
+
+func (cs *CameraServer) handleStopCameraGin(c *gin.Context) {
+	cs.handleStopCamera(c.Writer, c.Request)
 }
 
 func (cs *CameraServer) captureImage() ([]byte, error) {

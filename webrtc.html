@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎥 Alien Cam - WebRTC Streaming</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 800px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            aspect-ratio: 16/9;
+        }
+        
+        .video-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(45deg, #1a1a2e, #16213e);
+            color: #fff;
+            font-size: 1.2em;
+            text-align: center;
+        }
+        
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #00d4ff, #0099cc);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(45deg, #ff416c, #ff4b2b);
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            text-align: center;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(5px);
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+            background: #ff4444;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.active {
+            background: #44ff44;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .info {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        
+        .info h3 {
+            margin-bottom: 10px;
+            color: #00d4ff;
+        }
+        
+        .info p {
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 10px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .debug {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .controls {
+                flex-direction: column;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎥 Alien Cam - WebRTC</h1>
+        
+        <div class="status">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">Desconectado</span>
+        </div>
+        
+        <div class="video-container">
+            <div class="video-placeholder" id="placeholder">
+                <div>
+                    <p>📹 WebRTC Streaming</p>
+                    <p style="font-size: 0.8em; opacity: 0.7; margin-top: 10px;">Haz clic en "Iniciar WebRTC" para comenzar</p>
+                </div>
+            </div>
+            <video id="videoStream" autoplay playsinline></video>
+        </div>
+        
+        <div class="controls">
+            <button class="btn btn-primary" id="startBtn" onclick="startWebRTC()">
+                🚀 Iniciar WebRTC
+            </button>
+            <button class="btn btn-danger" id="stopBtn" onclick="stopWebRTC()" disabled>
+                ⏹️ Detener WebRTC
+            </button>
+        </div>
+        
+        <div class="info">
+            <h3>📋 Información WebRTC</h3>
+            <p><strong>Estado:</strong> <span id="connectionState">Desconectado</span></p>
+            <p><strong>ICE State:</strong> <span id="iceState">Desconectado</span></p>
+            <p><strong>Peer ID:</strong> <span id="peerId">No asignado</span></p>
+            <p style="margin-top: 15px; font-size: 0.9em; opacity: 0.8;">
+                💡 WebRTC proporciona streaming de video real con baja latencia
+            </p>
+        </div>
+        
+        <div class="debug" id="debug">
+            <div>🔍 Logs de WebRTC:</div>
+            <div id="debugLogs">Esperando conexión...</div>
+        </div>
+    </div>
+
+    <script>
+        let peerConnection = null;
+        let websocket = null;
+        let localStream = null;
+        let peerId = 'peer-' + Math.random().toString(36).substr(2, 9);
+        
+        function addDebugLog(message) {
+            const debugLogs = document.getElementById('debugLogs');
+            const timestamp = new Date().toLocaleTimeString();
+            debugLogs.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            debugLogs.scrollTop = debugLogs.scrollHeight;
+        }
+        
+        function updateStatus(isActive, message) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const placeholder = document.getElementById('placeholder');
+            const videoStream = document.getElementById('videoStream');
+            
+            if (isActive) {
+                indicator.classList.add('active');
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                placeholder.style.display = 'none';
+                videoStream.style.display = 'block';
+            } else {
+                indicator.classList.remove('active');
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                placeholder.style.display = 'flex';
+                videoStream.style.display = 'none';
+            }
+            
+            statusText.textContent = message;
+        }
+        
+        async function startWebRTC() {
+            const startBtn = document.getElementById('startBtn');
+            const originalText = startBtn.innerHTML;
+            startBtn.innerHTML = '<span class="loading"></span>Iniciando...';
+            startBtn.disabled = true;
+            
+            try {
+                addDebugLog('🚀 Iniciando WebRTC...');
+                
+                // Conectar WebSocket para signaling
+                websocket = new WebSocket('ws://' + window.location.host + '/ws');
+                
+                websocket.onopen = () => {
+                    addDebugLog('🔌 WebSocket conectado');
+                };
+                
+                websocket.onmessage = async (event) => {
+                    const msg = JSON.parse(event.data);
+                    addDebugLog(`📨 Mensaje recibido: ${msg.type}`);
+                    
+                    switch (msg.type) {
+                        case 'answer':
+                            await handleAnswer(msg.payload);
+                            break;
+                        case 'ice-candidate':
+                            await handleICECandidate(msg.payload);
+                            break;
+                    }
+                };
+                
+                websocket.onerror = (error) => {
+                    addDebugLog(`❌ Error WebSocket: ${error}`);
+                };
+                
+                // Crear PeerConnection
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                });
+                
+                // Event handlers
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        addDebugLog('🧊 Enviando ICE candidate');
+                        websocket.send(JSON.stringify({
+                            type: 'ice-candidate',
+                            peerId: peerId,
+                            payload: event.candidate
+                        }));
+                    }
+                };
+                
+                peerConnection.onconnectionstatechange = () => {
+                    const state = peerConnection.connectionState;
+                    document.getElementById('connectionState').textContent = state;
+                    addDebugLog(`🔄 Estado de conexión: ${state}`);
+                    
+                    if (state === 'connected') {
+                        updateStatus(true, 'WebRTC conectado - Streaming activo');
+                    } else if (state === 'failed' || state === 'disconnected') {
+                        updateStatus(false, 'WebRTC desconectado');
+                    }
+                };
+                
+                peerConnection.oniceconnectionstatechange = () => {
+                    const state = peerConnection.iceConnectionState;
+                    document.getElementById('iceState').textContent = state;
+                    addDebugLog(`🧊 Estado ICE: ${state}`);
+                };
+                
+                peerConnection.ontrack = (event) => {
+                    addDebugLog('📥 Track recibido');
+                    const videoStream = document.getElementById('videoStream');
+                    videoStream.srcObject = event.streams[0];
+                };
+                
+                // Obtener stream local (cámara)
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        },
+                        audio: false
+                    });
+                    
+                    addDebugLog('📹 Cámara local obtenida');
+                    
+                    // Añadir tracks al peer connection
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+                    
+                } catch (error) {
+                    addDebugLog(`⚠️  Error obteniendo cámara: ${error.message}`);
+                    // Continuar sin cámara local (solo recepción)
+                }
+                
+                // Crear y enviar offer
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                
+                addDebugLog('📤 Enviando offer');
+                websocket.send(JSON.stringify({
+                    type: 'offer',
+                    peerId: peerId,
+                    payload: offer
+                }));
+                
+                document.getElementById('peerId').textContent = peerId;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                addDebugLog(`❌ Error: ${error.message}`);
+                updateStatus(false, 'Error al iniciar WebRTC');
+                startBtn.innerHTML = originalText;
+                startBtn.disabled = false;
+            }
+        }
+        
+        async function handleAnswer(answer) {
+            try {
+                addDebugLog('📋 Procesando answer');
+                await peerConnection.setRemoteDescription(answer);
+                addDebugLog('✅ Answer establecido');
+            } catch (error) {
+                addDebugLog(`❌ Error procesando answer: ${error.message}`);
+            }
+        }
+        
+        async function handleICECandidate(candidate) {
+            try {
+                addDebugLog('🧊 Procesando ICE candidate');
+                await peerConnection.addIceCandidate(candidate);
+            } catch (error) {
+                addDebugLog(`❌ Error añadiendo ICE candidate: ${error.message}`);
+            }
+        }
+        
+        function stopWebRTC() {
+            const stopBtn = document.getElementById('stopBtn');
+            const originalText = stopBtn.innerHTML;
+            stopBtn.innerHTML = '<span class="loading"></span>Deteniendo...';
+            stopBtn.disabled = true;
+            
+            try {
+                addDebugLog('🛑 Deteniendo WebRTC...');
+                
+                if (peerConnection) {
+                    peerConnection.close();
+                    peerConnection = null;
+                }
+                
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+                
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                
+                const videoStream = document.getElementById('videoStream');
+                videoStream.srcObject = null;
+                
+                updateStatus(false, 'WebRTC detenido');
+                addDebugLog('✅ WebRTC detenido');
+                
+            } catch (error) {
+                console.error('Error:', error);
+                addDebugLog(`❌ Error deteniendo WebRTC: ${error.message}`);
+            }
+            
+            stopBtn.innerHTML = originalText;
+        }
+    </script>
+</body>
+</html>
