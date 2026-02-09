@@ -290,22 +290,35 @@
             try {
                 addDebugLog('🚀 Iniciando WebRTC...');
                 
-                // Verificar si navigator.mediaDevices está disponible
+                // Verificar y configurar navigator.mediaDevices
                 if (!navigator.mediaDevices) {
-                    addDebugLog('⚠️  navigator.mediaDevices no disponible - usando polyfill');
+                    addDebugLog('⚠️  navigator.mediaDevices no disponible - creando polyfill');
                     navigator.mediaDevices = {};
                 }
                 
+                // Configurar getUserMedia con polyfill completo
                 if (!navigator.mediaDevices.getUserMedia) {
-                    navigator.mediaDevices.getUserMedia = function(constraints) {
-                        const getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-                        if (!getUserMedia) {
-                            return Promise.reject(new Error('getUserMedia no está implementado'));
-                        }
-                        return new Promise((resolve, reject) => {
-                            getUserMedia.call(navigator, constraints, resolve, reject);
-                        });
-                    };
+                    addDebugLog('🔧 Configurando getUserMedia polyfill');
+                    
+                    // Obtener la implementación correcta
+                    const getUserMedia = navigator.getUserMedia || 
+                                      navigator.webkitGetUserMedia || 
+                                      navigator.mozGetUserMedia || 
+                                      navigator.msGetUserMedia;
+                    
+                    if (getUserMedia) {
+                        navigator.mediaDevices.getUserMedia = function(constraints) {
+                            addDebugLog('📱 Usando polyfill getUserMedia');
+                            return new Promise((resolve, reject) => {
+                                getUserMedia.call(navigator, constraints, resolve, reject);
+                            });
+                        };
+                    } else {
+                        addDebugLog('❌ getUserMedia no disponible en este navegador');
+                        navigator.mediaDevices.getUserMedia = function(constraints) {
+                            return Promise.reject(new Error('getUserMedia no está implementado en este navegador'));
+                        };
+                    }
                 }
                 
                 // Conectar WebSocket para signaling y esperar conexión

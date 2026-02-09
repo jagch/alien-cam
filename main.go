@@ -56,6 +56,7 @@ func (w *WebRTCManager) createPeerConnection(peerID string) (*webrtc.PeerConnect
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
+		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
 	}
 
 	peerConnection, err := webrtc.NewPeerConnection(config)
@@ -159,8 +160,13 @@ func (w *WebRTCManager) handleOffer(conn *websocket.Conn, msg SignalingMessage) 
 		return
 	}
 
+	// Añadir logging detallado para debugging
+	log.Printf("📋 Offer recibido: %s", offer.Type)
+	log.Printf("📋 Offer SDP: %s", offer.SDP[:min(200, len(offer.SDP))]+"...")
+
 	if err := pc.SetRemoteDescription(offer); err != nil {
 		log.Printf("❌ Error estableciendo remote description: %v", err)
+		log.Printf("❌ Detalles del error - Offer Type: %s", offer.Type)
 		return
 	}
 
@@ -224,6 +230,14 @@ func (w *WebRTCManager) startVideoCapture(peerID string) {
 	// 1. Usar FFmpeg para capturar video de la cámara Android
 	// 2. Codificar a formato WebRTC (VP8/H264)
 	// 3. Enviar paquetes RTP al peer connection
+}
+
+// Función auxiliar para evitar errores
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 type StreamInfo struct {
