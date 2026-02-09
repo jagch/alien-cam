@@ -430,26 +430,45 @@ func (cs *CameraServer) handleHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cs *CameraServer) handleStream(w http.ResponseWriter, r *http.Request) {
-	// Simular streaming de imagen desde cámara
-	// En un entorno real, aquí se obtendría la imagen del dispositivo
+	log.Println("🎥 Petición de streaming recibida")
 
 	// Intentar capturar imagen usando Termux API
 	imgData, err := cs.captureImage()
 	if err != nil {
-		// Si no hay Termux, servir una imagen de demostración
+		log.Printf("❌ Falló captura de imagen: %v", err)
+
+		// Si no hay Termux, servir una imagen de demostración con más detalles
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.WriteHeader(http.StatusOK)
+
+		errorMsg := "Cámara no disponible"
+		if strings.Contains(err.Error(), "termux:api not available") {
+			errorMsg = "Termux:API no instalado"
+		} else if strings.Contains(err.Error(), "camera info failed") {
+			errorMsg = "Permisos de cámara denegados"
+		} else if strings.Contains(err.Error(), "camera capture failed") {
+			errorMsg = "Error al capturar imagen"
+		}
+
 		fmt.Fprintf(w, `<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg">
 			<rect width="640" height="480" fill="%231a1a2e"/>
-			<text x="320" y="240" font-family="Arial" font-size="24" fill="white" text-anchor="middle">
-				📱 Cámara no disponible
+			<text x="320" y="200" font-family="Arial" font-size="28" fill="white" text-anchor="middle">
+				📱 %s
 			</text>
-			<text x="320" y="270" font-family="Arial" font-size="16" fill="%23ccc" text-anchor="middle">
-				Instala Termux:API para acceso real a la cámara
+			<text x="320" y="240" font-family="Arial" font-size="18" fill="%23ff6b6b" text-anchor="middle">
+				Error: %s
 			</text>
-		</svg>`)
+			<text x="320" y="280" font-family="Arial" font-size="14" fill="%23ccc" text-anchor="middle">
+				Revisa la consola para más detalles
+			</text>
+			<text x="320" y="310" font-family="Arial" font-size="12" fill="%23999" text-anchor="middle">
+				Ejecuta: termux-camera-info
+			</text>
+		</svg>`, errorMsg, err.Error())
 		return
 	}
+
+	log.Printf("✅ Enviando imagen de streaming (%d bytes)", len(imgData))
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -472,7 +491,25 @@ func (cs *CameraServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cs *CameraServer) handleStartCamera(w http.ResponseWriter, r *http.Request) {
+	log.Println("🎥 Petición para iniciar cámara recibida")
+
+	// Probar captura de imagen para verificar disponibilidad
+	_, err := cs.captureImage()
+	if err != nil {
+		log.Printf("❌ No se puede iniciar la cámara: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("Error al iniciar cámara: %v", err),
+			"debug":   "Revisa la consola para más detalles",
+		})
+		return
+	}
+
 	cs.running = true
+	log.Println("✅ Cámara iniciada correctamente")
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "started",
@@ -490,29 +527,78 @@ func (cs *CameraServer) handleStopCamera(w http.ResponseWriter, r *http.Request)
 }
 
 func (cs *CameraServer) captureImage() ([]byte, error) {
-	// Verificar si estamos en Android/Termux
-	if isAndroidEnvironment() {
-		// Obtener directorio temporal seguro para Android
-		tmpDir := getTempDir()
-		tmpFile := tmpDir + "/alien_cam_temp.jpg"
+	log.Println("🔍 Iniciando captura de imagen...")
 
-		// Verificar si Termux:API está disponible
-		if isCommandAvailable("termux-camera-info") {
-			// Capturar imagen con Termux:API
-			cmd := exec.Command("termux-camera-photo", "-o", tmpFile)
-			if err := cmd.Run(); err == nil {
-				// Leer la imagen capturada
-				if imgData, err := os.ReadFile(tmpFile); err == nil {
-					// Limpiar archivo temporal
-					os.Remove(tmpFile)
-					return imgData, nil
-				}
-			}
-		}
+	// Verificar si estamos en Android/Termux
+	if !isAndroidEnvironment() {
+		log.Println("❌ No se detectó entorno Android/Termux")
+		return nil, fmt.Errorf("not in android environment")
 	}
 
-	// Si no hay Termux o falla, retornar error para mostrar imagen demostración
-	return nil, fmt.Errorf("camera not available")
+	log.Println("✅ Entorno Android/Termux detectado")
+
+	// Obtener directorio temporal seguro para Android
+	tmpDir := getTempDir()
+	tmpFile := tmpDir + "/alien_cam_temp.jpg"
+
+	log.Printf("📁 Directorio temporal: %s", tmpDir)
+
+	// Verificar si Termux:API está disponible
+	if !isCommandAvailable("termux-camera-info") {
+		log.Println("❌ Termux:API no está disponible")
+		log.Println("💡 Solución: pkg install termux-api e instalar Termux:API desde F-Droid")
+		return nil, fmt.Errorf("termux:api not available")
+	}
+
+	log.Println("✅ Termux:API detectado")
+
+	// Probar obtener información de cámaras
+	cmd := exec.Command("termux-camera-info")
+	if output, err := cmd.Output(); err != nil {
+		log.Printf("❌ Error al obtener info de cámaras: %v", err)
+		log.Println("💡 Verifica permisos de cámara en Ajustes > Aplicaciones > Termux")
+		return nil, fmt.Errorf("camera info failed: %v", err)
+	} else {
+		log.Printf("📷 Cámaras detectadas: %s", string(output))
+	}
+
+	// Capturar imagen con Termux:API
+	log.Println("📸 Capturando imagen...")
+	cmd = exec.Command("termux-camera-photo", "-o", tmpFile)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		log.Printf("❌ Error al capturar imagen: %v", err)
+		log.Printf("📄 Salida del comando: %s", string(output))
+		log.Println("💡 Verifica:")
+		log.Println("   - Permisos de cámara concedidos a Termux")
+		log.Println("   - La cámara no está siendo usada por otra app")
+		log.Println("   - El dispositivo tiene cámara funcional")
+		return nil, fmt.Errorf("camera capture failed: %v", err)
+	}
+
+	log.Println("✅ Imagen capturada exitosamente")
+
+	// Verificar si el archivo existe
+	if _, err := os.Stat(tmpFile); os.IsNotExist(err) {
+		log.Printf("❌ El archivo de imagen no existe: %s", tmpFile)
+		return nil, fmt.Errorf("image file not created")
+	}
+
+	// Leer la imagen capturada
+	imgData, err := os.ReadFile(tmpFile)
+	if err != nil {
+		log.Printf("❌ Error al leer archivo de imagen: %v", err)
+		return nil, fmt.Errorf("failed to read image: %v", err)
+	}
+
+	// Limpiar archivo temporal
+	if err := os.Remove(tmpFile); err != nil {
+		log.Printf("⚠️  No se pudo eliminar archivo temporal: %v", err)
+	} else {
+		log.Println("🗑️  Archivo temporal eliminado")
+	}
+
+	log.Printf("✅ Imagen leída correctamente (%d bytes)", len(imgData))
+	return imgData, nil
 }
 
 // isAndroidEnvironment verifica si estamos corriendo en Android/Termux
