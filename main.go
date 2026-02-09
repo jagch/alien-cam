@@ -562,9 +562,9 @@ func (cs *CameraServer) captureImage() ([]byte, error) {
 		log.Printf("📷 Cámaras detectadas: %s", string(output))
 	}
 
-	// Capturar imagen con Termux:API
+	// Capturar imagen con Termux:API (sintaxis correcta)
 	log.Println("📸 Capturando imagen...")
-	cmd = exec.Command("termux-camera-photo", "-o", tmpFile)
+	cmd = exec.Command("termux-camera-photo", tmpFile)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("❌ Error al capturar imagen: %v", err)
 		log.Printf("📄 Salida del comando: %s", string(output))
