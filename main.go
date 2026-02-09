@@ -56,7 +56,9 @@ func (w *WebRTCManager) createPeerConnection(peerID string) (*webrtc.PeerConnect
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
-		SDPSemantics: webrtc.SDPSemanticsUnifiedPlanWithFallback,
+		SDPSemantics:  webrtc.SDPSemanticsUnifiedPlan,
+		BundlePolicy:  webrtc.BundlePolicyMaxBundle,
+		RTCPMuxPolicy: webrtc.RTCPMuxPolicyRequire,
 	}
 
 	peerConnection, err := webrtc.NewPeerConnection(config)
@@ -269,6 +271,9 @@ func main() {
 	// Endpoints WebRTC
 	router.GET("/webrtc", server.handleWebRTC)
 	router.GET("/ws", server.handleWebSocket)
+
+	// Endpoint mejorado
+	router.GET("/enhanced", server.handleEnhanced)
 
 	// Obtener IP local
 	ip := getLocalIP()
@@ -777,6 +782,10 @@ func (cs *CameraServer) handleWebRTC(c *gin.Context) {
 
 func (cs *CameraServer) handleWebSocket(c *gin.Context) {
 	cs.webrtc.handleWebSocket(c)
+}
+
+func (cs *CameraServer) handleEnhanced(c *gin.Context) {
+	c.File("enhanced.html")
 }
 
 // Wrappers para Gin
