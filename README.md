@@ -1,38 +1,56 @@
 # 🎥 Alien Cam - Transmisión de Cámara Android
 
-Aplicación Go que transforma tu teléfono Android en una cámara IP accesible desde cualquier dispositivo en la misma red LAN.
+Aplicación Go optimizada para Android que transforma tu teléfono en una cámara IP accesible desde cualquier dispositivo en la misma red LAN.
 
-## 📋 Requisitos
+## 📋 Requisitos del Sistema
 
-### En Android (Termux):
-1. **Termux** - Emulador de terminal para Android
-2. **Go** - Lenguaje de programación
-3. **Termux:API** - Para acceso al hardware del dispositivo (opcional)
+### Android:
+- **Android 5.0+** (API 21)
+- **Termux** - Emulador de terminal para Android
+- **Go 1.21+** - Lenguaje de programación
+- **Termux:API** - Para acceso real a la cámara (opcional)
 
-## 🚀 Instalación en Termux
+### Permisos necesarios:
+- Internet (para servidor web)
+- Cámara (si se usa Termux:API)
+
+## 🚀 Instalación en Android (Termux)
 
 ### 1. Instalar Termux
-Descarga Termux desde F-Droid: https://f-droid.org/packages/com.termux/
+Descarga Termux desde **F-Droid** (recomendado): https://f-droid.org/packages/com.termux/
 
 ### 2. Actualizar paquetes
 ```bash
 pkg update && pkg upgrade
 ```
 
-### 3. Instalar Git y Go
+### 3. Instalar dependencias
 ```bash
 pkg install git golang
 ```
 
-### 4. Clonar y compilar Alien Cam
+### 4. Instalar Termux:API (opcional, para cámara real)
 ```bash
-git clone <URL-del-repositorio>
-cd alien-cam
-go build -o alien-cam main.go
+# Instalar el paquete
+pkg install termux-api
+
+# Descargar Termux:API desde F-Droid o Google Play
+# Conceder permisos de cámara cuando se solicite
 ```
 
-### 5. Ejecutar la aplicación
+### 5. Compilar y ejecutar
 ```bash
+# Clonar o descargar el código
+git clone <repository-url>
+cd alien-cam
+
+# Hacer ejecutable el script de compilación
+chmod +x build-android.sh
+
+# Compilar
+./build-android.sh
+
+# Ejecutar
 ./alien-cam
 ```
 
@@ -105,10 +123,25 @@ El servidor usa el puerto 8080. Si está ocupado, cambia el puerto en el código
 
 ```
 alien-cam/
-├── main.go          # Código principal del servidor
-├── go.mod          # Módulo Go
-├── README.md       # Este archivo
-└── alien-cam       # Ejecutable compilado
+├── main.go              # Código principal del servidor
+├── go.mod              # Módulo Go
+├── build-android.sh    # Script de compilación para Android
+├── README.md           # Este archivo
+└── alien-cam           # Ejecutable compilado
+```
+
+## 🔧 Compilación Manual
+
+Si el script automático no funciona:
+```bash
+# Verificar dependencias
+go version
+
+# Compilar manualmente
+go build -o alien-cam main.go
+
+# Ejecutar
+./alien-cam
 ```
 
 ## 🔒 Seguridad

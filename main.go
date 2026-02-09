@@ -1,3 +1,5 @@
+//go:build android
+
 package main
 
 import (
@@ -8,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -487,21 +490,21 @@ func (cs *CameraServer) handleStopCamera(w http.ResponseWriter, r *http.Request)
 }
 
 func (cs *CameraServer) captureImage() ([]byte, error) {
-	// Siempre intentar con Termux API primero si estamos en Android
-	if os.Getenv("TERMUX") != "" {
-		// Crear directorio temporal si no existe
-		tmpDir := "/data/data/com.termux/files/home"
-		tmpFile := tmpDir + "/tmp_cam.jpg"
+	// Verificar si estamos en Android/Termux
+	if isAndroidEnvironment() {
+		// Obtener directorio temporal seguro para Android
+		tmpDir := getTempDir()
+		tmpFile := tmpDir + "/alien_cam_temp.jpg"
 
 		// Verificar si Termux:API está disponible
-		cmd := exec.Command("sh", "-c", "command -v termux-camera-info")
-		if err := cmd.Run(); err == nil {
+		if isCommandAvailable("termux-camera-info") {
 			// Capturar imagen con Termux:API
-			cmd = exec.Command("termux-camera-photo", "-o", tmpFile)
+			cmd := exec.Command("termux-camera-photo", "-o", tmpFile)
 			if err := cmd.Run(); err == nil {
 				// Leer la imagen capturada
-				imgData, err := os.ReadFile(tmpFile)
-				if err == nil {
+				if imgData, err := os.ReadFile(tmpFile); err == nil {
+					// Limpiar archivo temporal
+					os.Remove(tmpFile)
 					return imgData, nil
 				}
 			}
@@ -512,51 +515,104 @@ func (cs *CameraServer) captureImage() ([]byte, error) {
 	return nil, fmt.Errorf("camera not available")
 }
 
+// isAndroidEnvironment verifica si estamos corriendo en Android/Termux
+func isAndroidEnvironment() bool {
+	return os.Getenv("TERMUX") != "" || runtime.GOOS == "android"
+}
+
+// getTempDir obtiene un directorio temporal seguro para Android
+func getTempDir() string {
+	if isAndroidEnvironment() {
+		// En Termux, usar el directorio home del usuario
+		if home := os.Getenv("HOME"); home != "" {
+			return home
+		}
+		// Fallback a directorio estándar de Termux
+		return "/data/data/com.termux/files/home"
+	}
+	// Para otros sistemas, usar el directorio temporal del sistema
+	if tmp := os.Getenv("TMPDIR"); tmp != "" {
+		return tmp
+	}
+	return "/tmp"
+}
+
+// isCommandAvailable verifica si un comando está disponible en el sistema
+func isCommandAvailable(command string) bool {
+	cmd := exec.Command("sh", "-c", "command -v "+command)
+	err := cmd.Run()
+	return err == nil
+}
+
+// getLocalIP obtiene la IP local con métodos compatibles con Android
 func getLocalIP() string {
-	// Método mejorado para obtener IP local en Termux
-	if os.Getenv("TERMUX") != "" {
-		// Método 1: ip route get
-		cmd := exec.Command("sh", "-c", "ip route get 8.8.8.8 | awk '{print $7}' | head -1")
-		if output, err := cmd.Output(); err == nil {
-			ip := strings.TrimSpace(string(output))
-			if ip != "" && ip != "0.0.0.0" {
-				return ip
+	if isAndroidEnvironment() {
+		// Método 1: ip route get (más confiable en Android)
+		if isCommandAvailable("ip") {
+			cmd := exec.Command("sh", "-c", "ip route get 8.8.8.8 | awk '{print $7}' | head -1")
+			if output, err := cmd.Output(); err == nil {
+				ip := strings.TrimSpace(string(output))
+				if ip != "" && ip != "0.0.0.0" && isValidIP(ip) {
+					return ip
+				}
 			}
 		}
 
 		// Método 2: hostname -I
-		cmd = exec.Command("hostname", "-I")
-		if output, err := cmd.Output(); err == nil {
-			ips := strings.Fields(string(output))
-			for _, ip := range ips {
-				if strings.HasPrefix(ip, "192.168.") || strings.HasPrefix(ip, "10.") ||
-					strings.HasPrefix(ip, "172.") || ip == "localhost" {
-					if ip != "localhost" {
+		if isCommandAvailable("hostname") {
+			cmd := exec.Command("hostname", "-I")
+			if output, err := cmd.Output(); err == nil {
+				ips := strings.Fields(string(output))
+				for _, ip := range ips {
+					if isValidIP(ip) && ip != "localhost" && !strings.HasPrefix(ip, "127.") {
 						return ip
 					}
 				}
 			}
 		}
 
-		// Método 3: ifconfig
-		cmd = exec.Command("sh", "-c", "ifconfig wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}'")
-		if output, err := cmd.Output(); err == nil {
-			ip := strings.TrimSpace(string(output))
-			if ip != "" && ip != "0.0.0.0" {
-				return ip
+		// Método 3: ip addr show
+		if isCommandAvailable("ip") {
+			cmd := exec.Command("sh", "-c", "ip addr show | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | cut -d'/' -f1 | head -1")
+			if output, err := cmd.Output(); err == nil {
+				ip := strings.TrimSpace(string(output))
+				if ip != "" && isValidIP(ip) {
+					return ip
+				}
 			}
 		}
 
-		// Método 4: ip addr
-		cmd = exec.Command("sh", "-c", "ip addr show wlan0 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1")
-		if output, err := cmd.Output(); err == nil {
-			ip := strings.TrimSpace(string(output))
-			if ip != "" && ip != "0.0.0.0" {
-				return ip
+		// Método 4: ifconfig (si está disponible)
+		if isCommandAvailable("ifconfig") {
+			cmd := exec.Command("sh", "-c", "ifconfig | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -1")
+			if output, err := cmd.Output(); err == nil {
+				ip := strings.TrimSpace(string(output))
+				if ip != "" && isValidIP(ip) {
+					return ip
+				}
 			}
 		}
 	}
 
 	// Fallback genérico
 	return "localhost"
+}
+
+// isValidIP verifica si una cadena es una IP válida
+func isValidIP(ip string) bool {
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		return false
+	}
+	for _, part := range parts {
+		if len(part) == 0 || len(part) > 3 {
+			return false
+		}
+		for _, char := range part {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
